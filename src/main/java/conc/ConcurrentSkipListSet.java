@@ -1,17 +1,18 @@
-package seq;
+package conc;
 
 import java.util.AbstractSet;
 import java.util.Iterator;
 import java.util.NoSuchElementException;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.atomic.AtomicReferenceArray;
 
 import static java.lang.String.format;
 
 /**
+ * make concurrent @see SynchronizedConcurrency paper
  * @author tmjee
- * @param <E>
  */
-public class SkipListSet<E> extends AbstractSet<E> {
+public class ConcurrentSkipListSet<E> extends AbstractSet<E> {
 
     private final int MAX_LEVELS = 3;
 
@@ -19,10 +20,10 @@ public class SkipListSet<E> extends AbstractSet<E> {
     private final Tail<E> TAIL = new Tail<>(MAX_LEVELS);
 
 
-    public SkipListSet() {
+    public ConcurrentSkipListSet() {
         for (int a=0; a<=MAX_LEVELS; a++) {
-            HEAD.n[a] = TAIL;
-            TAIL.n[a] = null;
+            HEAD.n.set(a, TAIL);
+            TAIL.n.set(a, null);
         }
     }
 
@@ -34,13 +35,13 @@ public class SkipListSet<E> extends AbstractSet<E> {
 
     @Override
     public int size() {
-        Node<E> c = HEAD.n[0];
+        Node<E> c = HEAD.n.get(0);
         int size = 0;
         while(c != TAIL) {
             if (!c.d) {
                 size++;
             }
-            c = c.n[0];
+            c = c.n.get(0);
         }
         return size;
     }
@@ -75,9 +76,12 @@ public class SkipListSet<E> extends AbstractSet<E> {
         Node<E> p[] = path(e);
         if (p[0] == HEAD || compare(p[0].v, e) != 0) {
             Node<E> t = new Node<>(e, random(MAX_LEVELS));
-            for (int a=0;a<t.n.length;a++) {
-                t.n[a] = p[a].n[a];
-                p[a].n[a] = t;
+            for (int a=0;a<t.n.length();a++) {
+
+                Node<E> _n = p[a].n.get(a);
+
+                t.n.set(a, _n);
+                p[a].n.compareAndSet(a, _n, t);
             }
             return true;
         }
@@ -89,14 +93,14 @@ public class SkipListSet<E> extends AbstractSet<E> {
         Node<E> p[] = new Node[MAX_LEVELS+1];
         Node<E> c = HEAD;
         for (int a=MAX_LEVELS; a>=0; a--) {
-            Node<E> t = c.n[a];
+            Node<E> t = c.n.get(a);
 
             while(true) {
                 if (t == TAIL) {
                     p[a] = c;
                     break;
                 } else if (t.d) {
-                    t = t.n[a];
+                    t = t.n.get(a);
                 } else  {
                     int r = compare(t.v, e);
                     if (r == 0) {
@@ -105,7 +109,7 @@ public class SkipListSet<E> extends AbstractSet<E> {
                         break;
                     } else if (r < 0) {
                         c = t;
-                        t = t.n[a];
+                        t = t.n.get(a);
                     } else {
                         p[a] = c;
                         break;
@@ -131,27 +135,16 @@ public class SkipListSet<E> extends AbstractSet<E> {
     }
 
 
-    public void print() {
-        Node<E> c = HEAD;
-        while( c!= null) {
-            for (int a=0; a<c.n.length; a++) {
-                System.out.print(format("%s/%s(%s)\t", c.v==null?"<n>":c.v, c.d ?"y":"n", a));
-            }
-            System.out.println();
-            c = c.n[0];
-        }
-    }
-
-
 
     private static class Node<E> {
         final E v;
-        final Node<E>[] n;
-        boolean d;
+        final AtomicReferenceArray<Node<E>> n;
+        volatile boolean d;
+        volatile Node<E> a;
 
         private Node(E v, int levels) {
             this.v = v;
-            this.n = new Node[levels+1];
+            this.n = new AtomicReferenceArray<Node<E>>(new Node[levels+1]);
             d = false;
         }
     }
@@ -174,9 +167,9 @@ public class SkipListSet<E> extends AbstractSet<E> {
 
         private final Head<E> HEAD;
         private final Tail<E> TAIL;
-        private Node<E> curr;
-        private Node<E> prev;
-        private Node<E> next;
+        private volatile Node<E> curr;
+        private volatile Node<E> prev;
+        private volatile Node<E> next;
 
         public InternalIterator(Head<E> head, Tail<E> tail) {
             this.HEAD = head;
@@ -194,7 +187,7 @@ public class SkipListSet<E> extends AbstractSet<E> {
         public E next() {
             _next();
             if (next == null) {
-                throw new  NoSuchElementException("No such element");
+                throw new NoSuchElementException("No such element");
             }
             prev = next;
             next = null;
@@ -211,14 +204,14 @@ public class SkipListSet<E> extends AbstractSet<E> {
 
         private void _next() {
             if (next == null && curr != TAIL) {
-                Node<E> c = curr.n[0];
+                Node<E> c = curr.n.get(0);
                 while(c != TAIL && c.d) {
-                    c = c.n[0];
+                    c = c.n.get(0);
                 }
                 if (c != TAIL && (!c.d)) {
-                   next = c;
+                    next = c;
                 } else {
-                   next = null;
+                    next = null;
                 }
                 curr = c;
             }
