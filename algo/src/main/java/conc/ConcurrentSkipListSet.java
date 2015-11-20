@@ -38,12 +38,23 @@ public class ConcurrentSkipListSet<E> extends AbstractSet<E> {
         Node<E> c = HEAD.n.get(0);
         int size = 0;
         while(c != TAIL) {
-            if (!c.d) {
+            if (!c.d && (!(c instanceof Marker))) {
                 size++;
             }
             c = c.n.get(0);
         }
         return size;
+    }
+
+    public void print() {
+        Node<E> c = HEAD;
+        while( c!= null) {
+            for (int a=0; a<c.n.length(); a++) {
+                System.out.print(format("%s/%s(%s)\t", c.v==null?"<n>":c.v, c.d ?"y":"n", a));
+            }
+            System.out.println();
+            c = c.n.get(0);
+        }
     }
 
     @Override
@@ -64,27 +75,55 @@ public class ConcurrentSkipListSet<E> extends AbstractSet<E> {
             return false;
         else if (compare(p[0].v, e)==0) {
             p[0].d = true;
+            addMarker(p[0]);
             return true;
         }
         return false;
     }
 
 
+    private void addMarker(Node<E> n) {
+        Marker<E> m = new Marker<>(null, n.n.length()-1);
+
+        for (int a=0; a<m.n.length(); a++) {
+            Node<E> x = n.n.get(a);
+            m.n.compareAndSet(a, null, x);
+            n.n.compareAndSet(a, x, m);
+        }
+    }
+
+
 
     @Override
     public boolean add(E e) {
-        Node<E> p[] = path(e);
-        if (p[0] == HEAD || compare(p[0].v, e) != 0) {
-            Node<E> t = new Node<>(e, random(MAX_LEVELS));
-            for (int a=0;a<t.n.length();a++) {
+        boolean retry = false;
+        do {
+            Node<E> p[] = path(e);
+            if (p[0] == HEAD || compare(p[0].v, e) != 0) {
+                Node<E> t = new Node<>(e, random(MAX_LEVELS));
 
-                Node<E> _n = p[a].n.get(a);
+                Node<E> _n = p[0].n.get(0);
+                t.n.set(0, _n);
+                retry = (!p[0].n.compareAndSet(0, _n, t));
 
-                t.n.set(a, _n);
-                p[a].n.compareAndSet(a, _n, t);
+                if (!retry) {
+                    for (int a = 1; a < t.n.length(); a++) {
+                        boolean retry2 = false;
+
+                        do {
+                            _n = p[a].n.get(a);
+
+                            t.n.set(a, _n);
+                            retry2 = (!p[a].n.compareAndSet(a, _n, t));
+                            if (retry2) {
+                                p = path(e);
+                            }
+                        } while(retry2);
+                    }
+                    return true;
+                }
             }
-            return true;
-        }
+        } while(retry);
         return false;
     }
 
@@ -99,7 +138,12 @@ public class ConcurrentSkipListSet<E> extends AbstractSet<E> {
                 if (t == TAIL) {
                     p[a] = c;
                     break;
+                } else if (t instanceof Marker) {
+                    t = t.n.get(a);
                 } else if (t.d) {
+                    if (!(t.n.get(a) instanceof Marker)) {
+                        addMarker(t);
+                    }
                     t = t.n.get(a);
                 } else  {
                     int r = compare(t.v, e);
@@ -158,6 +202,12 @@ public class ConcurrentSkipListSet<E> extends AbstractSet<E> {
     private final static class Tail<E> extends Node<E> {
         private Tail(int levels) {
             super(null, levels);
+        }
+    }
+
+    private final static class Marker<E> extends Node<E> {
+        private Marker(E v, int levels) {
+            super(v, levels);
         }
     }
 

@@ -1,5 +1,6 @@
 package seq;
 
+import conc.ConcurrentSkipListSet;
 import org.junit.Before;
 import org.junit.Test;
 
@@ -11,11 +12,11 @@ import static org.junit.Assert.assertTrue;
 
 public class SkipListSetTest {
 
-    private SkipListSet<Integer> s;
+    private ConcurrentSkipListSet<Integer> s;
 
     @Before
     public void before() {
-       s = new SkipListSet<>();
+       s = new ConcurrentSkipListSet<>();
     }
 
 
@@ -56,6 +57,7 @@ public class SkipListSetTest {
         s.add(4);
         s.add(5);
 
+        assertEquals(s.size(), 5);
         assertTrue(s.remove(2));
         assertFalse(s.remove(6));
         assertEquals(s.size(), 4);
