@@ -96,7 +96,9 @@ public class SkipListSet<E> extends AbstractSet<E> {
                     p[a] = c;
                     break;
                 } else if (t.d) {
-                    t = t.n[a];
+                    Node<E> x = t.n[a];
+                    c.n[a] = x;
+                    t = x;
                 } else  {
                     int r = compare(t.v, e);
                     if (r == 0) {

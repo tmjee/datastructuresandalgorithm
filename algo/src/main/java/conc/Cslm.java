@@ -13,11 +13,24 @@ public class Cslm<E> extends AbstractSet<E> {
     private final HeadIndex<E> head;
 
     public Cslm() {
-        head = new HeadIndex<E>()
+        head = new HeadIndex<E>(1, null, null, null);
     }
 
 
+    @Override
+    public boolean add(E e) {
+        return super.add(e);
+    }
 
+    @Override
+    public boolean remove(Object o) {
+        return super.remove(o);
+    }
+
+    @Override
+    public boolean contains(Object o) {
+        return super.contains(o);
+    }
 
     @Override
     public Iterator<E> iterator() {
@@ -30,50 +43,155 @@ public class Cslm<E> extends AbstractSet<E> {
     }
 
 
+    private boolean doPut(E e) {
+        Node<E> z = null;
+        outer:for(;;) {
+            for (Node<E> b = findPredecessor(e), n = b.r; ;) {
+                if (n != null) {
+                    E v = n.v;
+                    Node<E> f = n.r;
+
+                    if (b.r != n) {
+                        break; // inconsistent read
+                    }
+                    if (n.isDeleted()) { // deleted but might not be marked
+                        n.helpDeleteThisNode(b,f);
+                        break;
+                    }
+                    if (b.isDeleted() || n.isMarker()) { // b delete
+                        break;
+                    }
 
 
-    public Node<E> findPredecessor() {
+                    int c = 0;
+                    if (compare(e,n.v) == 0) {
+                       return false;
+                    }
+                }
 
+                // new Node
+                z = new Node<E>(e,n);
+                if(!b.casN(n,z)) {
+                    break;
+                }
+                break outer;
+            }
+        }
     }
 
 
 
+    public Node<E> findPredecessor(E e) {
+        for (;;) {
+            for (Index<E> q = head, r = q.r, d; ; ) {
+                if (r != null) {
+                    Node<E> n = r.n;
+                    if (n == null) { // index deleted
+                        if (!q.unlink(r)) {
+                            break;
+                        }
+                        r = q.r;
+                        continue;
+                    }
+                    if (compare(e, n.v)>0) {
+                        q = r;
+                        r = q.r;
+                        continue;
+                    }
+                }
+                if ((d=q.d) == null) {
+                    return q.n;
+                }
+                q = q.d;
+                r = q.r;
+            }
+        }
+    }
+
+    public Node<E> findNode(E e) {
+        outer:
+        for (;;) {
+            for (Node<E> b = findPredecessor(e), n = b.r; ; ) {
+                if (n == null) {
+                    break outer;
+                }
+                Node<E> f = n.r;
+                E v = n.v;
+
+                if (b.r != n) { // inconsistent read
+                    break;
+                }
+                if (b.isDeleted()) {        // n deleted, but may not be marked
+                    n.helpDeleteThisNode(b, f);
+                    break;
+                }
+                if (b.isDeleted() && n.isMarker()) { // b deleted and marked
+                   break;
+                }
+                int c = 0;
+                if ((c=compare(e, n.v))==0) {
+                   return n;
+                }
+                if (c<0) {
+                    break outer;
+                }
+                b = n;
+                n = f;
+            }
+        }
+        return null;
+    }
 
 
-    static final class Node<E> {
+    private int compare(E e1, E e2) {
+        if (e1==e2)
+            return 0;
+        if (e1 == null && e2 != null)
+            return -1;
+        if (e1 != null && e2 == null)
+            return 1;
+        return ((Comparable<E>)e1).compareTo(e2);
+    }
+
+
+
+    static class Node<E> {
         final E v;
-        volatile Node<E> n;
+        volatile Node<E> r;
+        volatile boolean d;
 
         static AtomicReferenceFieldUpdater<Node, Node> updater =
                 AtomicReferenceFieldUpdater.<Node, Node>newUpdater(Node.class, Node.class, "n");
 
-        Node(E v, Node<E> n) {
+        Node(E v, Node<E> r) {
             this.v = v;
-            this.n = n;
+            this.r = r;
+            this.d = false;
         }
 
-        Node(Node<E> n) { // maker node
-            this(null, n);
-        }
 
         boolean casN(Node<E> expected, Node<E> update) {
             return updater.compareAndSet(this, expected, update);
         }
 
         boolean isMarker() {
-            return (v == null);
+            return false;
+        }
+
+        boolean isDeleted() {
+            return d;
         }
 
         boolean appendMarkerOnThisNode(Node<E> expected) {
-            return updater.compareAndSet(this, expected, new Node<E>(expected));
+            return updater.compareAndSet(this, expected, new Marker<E>(expected));
         }
 
         void helpDeleteThisNode(Node<E> predecessor, Node<E> successor) {
-            if (predecessor.n == this && n == successor) {
+            if (predecessor.r == this && r == successor) {
                 if (successor == null || (!successor.isMarker())) {
                     appendMarkerOnThisNode(successor);
                 } else {
-                    predecessor.casN(this, successor.n);
+                    predecessor.casN(this, successor.r);
                 }
             }
         }
@@ -84,6 +202,20 @@ public class Cslm<E> extends AbstractSet<E> {
                 return e;
             }
             return null;
+        }
+    }
+
+    static class Marker<E> extends Node<E> {
+        Marker(Node<E> r) { // maker node
+            super(null, r);
+        }
+        @Override
+        boolean isMarker() {
+            return true;
+        }
+        @Override
+        boolean isDeleted() {
+            return false;
         }
     }
 

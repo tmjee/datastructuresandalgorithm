@@ -14,7 +14,7 @@ import static java.lang.String.format;
  */
 public class ConcurrentSkipListSet<E> extends AbstractSet<E> {
 
-    private final int MAX_LEVELS = 3;
+    private final int MAX_LEVELS = 64;
 
     private final Head<E> HEAD = new Head<>(MAX_LEVELS);
     private final Tail<E> TAIL = new Tail<>(MAX_LEVELS);
@@ -141,8 +141,11 @@ public class ConcurrentSkipListSet<E> extends AbstractSet<E> {
                 } else if (t instanceof Marker) {
                     t = t.n.get(a);
                 } else if (t.d) {
-                    if (!(t.n.get(a) instanceof Marker)) {
+                    Node<E> m = t.n.get(a);
+                    if (!(m instanceof Marker)) {
                         addMarker(t);
+                    } else {
+                        c.n.compareAndSet(a, t, m.n.get(a));
                     }
                     t = t.n.get(a);
                 } else  {
@@ -175,7 +178,12 @@ public class ConcurrentSkipListSet<E> extends AbstractSet<E> {
     }
 
     private int random(int max) {
-        return ThreadLocalRandom.current().nextInt(max+1);
+        ThreadLocalRandom r= ThreadLocalRandom.current();
+        int level = 0;
+        while ((r.nextInt(10) >= 5) && (level < max)) {
+            level++;
+        }
+        return level;
     }
 
 
