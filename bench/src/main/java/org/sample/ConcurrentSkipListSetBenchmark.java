@@ -104,7 +104,21 @@ public class ConcurrentSkipListSetBenchmark {
     @Benchmark
     @BenchmarkMode({Mode.Throughput, Mode.SampleTime})
     @OutputTimeUnit(TimeUnit.SECONDS)
-    public void baseline() {
+    public void baseline(Randomness r, Blackhole bh) {
+        switch(r.c) {
+            case FIRST_1:
+                bh.consume(ThreadLocalRandom.current().nextInt());
+                break;
+            case FIRST_2:
+                bh.consume(ThreadLocalRandom.current().nextInt());
+                break;
+            case SECOND:
+                bh.consume(new Object());
+                break;
+            case THIRD:
+                bh.consume(ThreadLocalRandom.current().nextInt());
+                break;
+        }
     }
 
     @Benchmark

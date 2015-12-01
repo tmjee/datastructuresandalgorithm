@@ -3,6 +3,7 @@ package conc;
 import java.util.AbstractSet;
 import java.util.Comparator;
 import java.util.Iterator;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicReferenceFieldUpdater;
 
 /**
@@ -12,19 +13,27 @@ public class Cslm<E> extends AbstractSet<E> {
 
     private final HeadIndex<E> head;
 
+    private static AtomicReferenceFieldUpdater<Cslm, HeadIndex> updater =
+        AtomicReferenceFieldUpdater.newUpdater(Cslm.class, HeadIndex.class, "head");
+
+
     public Cslm() {
         head = new HeadIndex<E>(1, null, null, null);
+    }
+
+    boolean casHead(HeadIndex<E> expected, HeadIndex<E> current) {
+        return updater.compareAndSet(this, expected, current);
     }
 
 
     @Override
     public boolean add(E e) {
-        return super.add(e);
+        return doPut(e);
     }
 
     @Override
     public boolean remove(Object o) {
-        return super.remove(o);
+        return doRemove((E)o);
     }
 
     @Override
@@ -42,8 +51,41 @@ public class Cslm<E> extends AbstractSet<E> {
         return 0;
     }
 
+    private boolean doRemove(E e) {
+        E v = null;
+        Node<E> f = null;
+        outer: for(;;) {
+            for (Node<E> b = findPredecessor(e), n = b.r; ; ) {
+                if (n == null) { //  no next
+                    break outer;
+                }
+                if (b.r != n) { // inconsistent read
+                    break ;
+                }
+                v = n.v;
+                f = n.r;
+                if (n.isDeleted()) { // n is deleted and may not  be marked yet
+                    n.helpDeleteThisNode(b,f);
+                    break;
+                }
+                if (b.isDeleted() || n.isMarker()) { // be is deleted
+                    break;
+                }
+                int c = compare(e, v);
+                if (c == 0) {
+
+                }
+
+            }
+        }
+        return false;
+    }
+
 
     private boolean doPut(E e) {
+        boolean added = false;
+
+        // find and put Node in
         Node<E> z = null;
         outer:for(;;) {
             for (Node<E> b = findPredecessor(e), n = b.r; ;) {
@@ -77,6 +119,88 @@ public class Cslm<E> extends AbstractSet<E> {
                 break outer;
             }
         }
+
+        // build Index
+        int rnd = ThreadLocalRandom.current().nextInt(10);
+        int level=1, max;
+        while(rnd >5) {
+            level++;
+            rnd = ThreadLocalRandom.current().nextInt(10);
+        }
+
+        HeadIndex h = head;
+        max = h.level;
+        Index<E> idx = null;
+        if (level <= max) {
+            for (int a=1; a<=level; a++) {
+                idx = new Index<E>(z, null, idx);
+            }
+
+        } else {
+            level = max + 1;
+
+            Index[] idxs = new Index[level + 1];
+
+            for (int a = 1; a <= level; a++) {
+                idx = idxs[a] = new Index<E>(z, null, idx);
+            }
+
+            for (; ; ) {
+                h = head;
+                int oldLevel = h.level;
+                if (level <= oldLevel) {
+                    break;
+                }
+                HeadIndex<E> hdx = h;
+                for (int j = oldLevel + 1; j <= level; j++) {
+                    hdx = new HeadIndex<>(j, z, idxs[j], hdx);
+                }
+                if(casHead(h, hdx)) {
+                   h=hdx;
+                    idx = idxs[level = oldLevel];
+                    break;
+                }
+            }
+        }
+
+        // put index into position
+        splice: for (int insertionLevel = level;;) {
+            int j = h.level;
+            for (Index<E> q = head, r = q.r, t = idx; ; ) {
+                if (r == null || q == null) {
+                    break splice;
+                }
+                if (r != null) {
+                    Node<E> n=r.n;
+                    int c = compare(e, n.v);
+                    if (c>0) {
+                       q = r;
+                        r = q.r;
+                        continue;
+                    }
+                }
+
+                if (insertionLevel == j) {
+                    if(!(added=q.link(r, t))) {
+                        break;
+                    }
+                    if (t.n.isDeleted()) {
+                        findNode(e);
+                        break splice;
+                    }
+                    if (--insertionLevel == 0) {
+                        break splice;
+                    }
+                }
+
+                if (--j >= insertionLevel && j < level)
+                    t = t.d;
+
+                q = q.d;
+                r = q.r;
+            }
+        }
+        return added;
     }
 
 
