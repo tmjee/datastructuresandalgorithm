@@ -68,14 +68,14 @@ public class Cslm<E> extends AbstractSet<E> {
                     n.helpDeleteThisNode(b,f);
                     break;
                 }
-                if (b.isDeleted() || n.isMarker()) { // be is deleted
+                if (b.isDeleted() || n.isMarker()) { // b is deleted
                     break;
                 }
                 int c = compare(e, v);
                 if (c == 0) {
-
+                    n.markDelete();
+                    return true;
                 }
-
             }
         }
         return false;
@@ -210,7 +210,7 @@ public class Cslm<E> extends AbstractSet<E> {
             for (Index<E> q = head, r = q.r, d; ; ) {
                 if (r != null) {
                     Node<E> n = r.n;
-                    if (n == null) { // index deleted
+                    if (n.isDeleted()) { // index deleted
                         if (!q.unlink(r)) {
                             break;
                         }
@@ -233,8 +233,7 @@ public class Cslm<E> extends AbstractSet<E> {
     }
 
     public Node<E> findNode(E e) {
-        outer:
-        for (;;) {
+        outer: for (;;) {
             for (Node<E> b = findPredecessor(e), n = b.r; ; ) {
                 if (n == null) {
                     break outer;
@@ -245,11 +244,11 @@ public class Cslm<E> extends AbstractSet<E> {
                 if (b.r != n) { // inconsistent read
                     break;
                 }
-                if (b.isDeleted()) {        // n deleted, but may not be marked
+                if (n.isDeleted()) {        // n deleted, but may not be marked
                     n.helpDeleteThisNode(b, f);
                     break;
                 }
-                if (b.isDeleted() && n.isMarker()) { // b deleted and marked
+                if (b.isDeleted() || n.isMarker()) { // b deleted and marked
                    break;
                 }
                 int c = 0;
@@ -304,6 +303,10 @@ public class Cslm<E> extends AbstractSet<E> {
 
         boolean isDeleted() {
             return d;
+        }
+
+        void markDelete() {
+            d = true;
         }
 
         boolean appendMarkerOnThisNode(Node<E> expected) {
